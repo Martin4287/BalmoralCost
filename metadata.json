@@ -1,0 +1,5 @@
+{
+  "name": "Calculadora de Costos de Restaurante",
+  "description": "Una aplicación web para calcular los costos de los platos de un restaurante, gestionar insumos, recetas e importar datos de ventas para analizar la rentabilidad.",
+  "requestFramePermissions": []
+}

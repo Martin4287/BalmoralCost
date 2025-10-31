@@ -554,7 +554,7 @@ const ImportPage: React.FC = () => {
         setMenuAIResult({ status: 'idle', message: '' });
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_API_KEY });
 
             const imageParts = await Promise.all(
                 menuFiles.map(async (file) => {

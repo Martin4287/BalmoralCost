@@ -29,7 +29,7 @@ const defaultMenuStructure: MenuData = [
       { id: generateId(), name: "Ñoquis de Papa con Salsa Rosa", price: 18500 }, { id: generateId(), name: "Canelones de Verdura con Salsa Filetto", price: 19500 },
       { id: generateId(), name: "Ravioles de Osobuco con crema de vegetales", price: 19500 }
     ]},
-    { title: "PLATOS PRINCIPALES", items: [
+    { title: "PLATOS PRINCIPAIS", items: [
       { id: generateId(), name: "Ojo de Bife con Papas fritas", price: 22000 }, { id: generateId(), name: "Bondiola de Cerdo al Verdeo con Papas Españolas", price: 20500 },
       { id: generateId(), name: "Pollo al Ajillo con Papas fritas", price: 20000 }, { id: generateId(), name: "Milanesa de Peceto Napolitana con Puré de Papas", price: 20000 },
       { id: generateId(), name: "Suprema de Pollo Napolitana con Puré de Papas", price: 19500 }, { id: generateId(), name: "Pesca del día con Boñato Asado", price: 20500 },
@@ -349,7 +349,8 @@ const CartaPage: React.FC<{ onNavigateToRecipe: (recipe: Recipe) => void }> = ({
                                     </h2>
                                 )}
                                 {isEditMode && (
-                                    <Button variant="danger" size="sm" onClick={() => handleDeleteSection(sectionIndex)}><Trash2 size={16} /></Button>
+// FIX: The Button component does not have a 'size' prop. Removing it to fix the error.
+                                    <Button variant="danger" onClick={() => handleDeleteSection(sectionIndex)}><Trash2 size={16} /></Button>
                                 )}
                             </div>
                              <div className="overflow-x-auto">
@@ -370,7 +371,8 @@ const CartaPage: React.FC<{ onNavigateToRecipe: (recipe: Recipe) => void }> = ({
                                                     <td className="p-2"><Input label="" value={item.name} onChange={e => handleMenuChange(sectionIndex, itemIndex, 'name', e.target.value)} /></td>
                                                     <td className="p-2 w-40"><Input label="" type="number" value={item.price} onChange={e => handleMenuChange(sectionIndex, itemIndex, 'price', parseFloat(e.target.value) || 0)} /></td>
                                                     <td className="p-2 text-right">
-                                                        <Button variant="danger" size="sm" onClick={() => handleDeleteItem(sectionIndex, itemIndex)}><Trash2 size={16}/></Button>
+{/* FIX: The Button component does not have a 'size' prop. Removing it to fix the error. */}
+                                                        <Button variant="danger" onClick={() => handleDeleteItem(sectionIndex, itemIndex)}><Trash2 size={16}/></Button>
                                                     </td>
                                                 </tr>
                                             ) : (

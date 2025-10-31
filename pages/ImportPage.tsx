@@ -554,7 +554,12 @@ const ImportPage: React.FC = () => {
         setMenuAIResult({ status: 'idle', message: '' });
 
         try {
-            const ai = new GoogleGenAI({ apiKey: process.env.NEXT_PUBLIC_API_KEY });
+            // Vercel exposes client-side variables prefixed with VITE_ via import.meta.env
+            const apiKey = (import.meta.env as any).VITE_API_KEY;
+            if (!apiKey) {
+                throw new Error("La clave de API no está configurada. Asegúrese de que la variable de entorno VITE_API_KEY esté definida en su despliegue de Vercel.");
+            }
+            const ai = new GoogleGenAI({ apiKey });
 
             const imageParts = await Promise.all(
                 menuFiles.map(async (file) => {

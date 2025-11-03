@@ -12,6 +12,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 
 // Define and export the DetailedSale type needed by SearchableProductSelect
 export interface DetailedSale {
+    date: string;
     name: string;
     quantity: number;
     salePrice: number;
@@ -62,6 +63,8 @@ const SalesPage: React.FC = () => {
     const [selectedProduct, setSelectedProduct] = useState<DetailedSale | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [sortConfig, setSortConfig] = useState<{ key: keyof DetailedSale, direction: 'ascending' | 'descending' }>({ key: 'totalProfit', direction: 'descending' });
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
 
     useEffect(() => {
         const fetchData = async () => {
@@ -101,6 +104,7 @@ const SalesPage: React.FC = () => {
                         const margin = recipeData.price > 0 ? (profitPerUnit / recipeData.price) * 100 : 0;
 
                         return {
+                            date: sale.date,
                             name: sale.name,
                             quantity: sale.quantity,
                             salePrice: recipeData.price,
@@ -126,6 +130,20 @@ const SalesPage: React.FC = () => {
         fetchData();
     }, []);
 
+    const filteredSales = useMemo(() => {
+        if (!startDate || !endDate) {
+            return salesData;
+        }
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999); // Make end date inclusive for the entire day
+
+        return salesData.filter(sale => {
+            const saleDate = new Date(sale.date);
+            return saleDate >= start && saleDate <= end;
+        });
+    }, [salesData, startDate, endDate]);
+
     const requestSort = (key: keyof DetailedSale) => {
         let direction: 'ascending' | 'descending' = 'ascending';
         if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
@@ -135,7 +153,7 @@ const SalesPage: React.FC = () => {
     };
 
     const sortedAndFilteredSales = useMemo(() => {
-        let sortableItems = [...salesData];
+        let sortableItems = [...filteredSales];
         
         // Sort
         sortableItems.sort((a, b) => {
@@ -156,7 +174,7 @@ const SalesPage: React.FC = () => {
             return 0;
         });
 
-        // Filter
+        // Filter by search term
         if (!searchTerm) {
             return sortableItems;
         }
@@ -164,18 +182,18 @@ const SalesPage: React.FC = () => {
             sale.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             sale.category.toLowerCase().includes(searchTerm.toLowerCase())
         );
-    }, [salesData, searchTerm, sortConfig]);
+    }, [filteredSales, searchTerm, sortConfig]);
 
     const summaryStats = useMemo(() => {
-        // FIX: Explicitly type the accumulator in `reduce` to ensure it's treated as a number.
-        const totalItemsSold = salesData.reduce((sum: number, item) => sum + item.quantity, 0);
-        const totalRevenue = salesData.reduce((sum: number, item) => sum + (item.salePrice * item.quantity), 0);
-        const totalCost = salesData.reduce((sum: number, item) => sum + (item.costWithVAT * item.quantity), 0);
+        const sourceData = filteredSales;
+        const totalItemsSold = sourceData.reduce((sum: number, item) => sum + item.quantity, 0);
+        const totalRevenue = sourceData.reduce((sum: number, item) => sum + (item.salePrice * item.quantity), 0);
+        const totalCost = sourceData.reduce((sum: number, item) => sum + (item.costWithVAT * item.quantity), 0);
         const totalProfit = totalRevenue - totalCost;
         const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
         
         return { totalItemsSold, totalRevenue, totalProfit, averageMargin };
-    }, [salesData]);
+    }, [filteredSales]);
 
     if (loading) {
         return <div className="text-center p-10">Cargando datos de ventas...</div>;
@@ -197,6 +215,20 @@ const SalesPage: React.FC = () => {
         <div className="space-y-8">
             <h1 className="text-4xl font-bold text-white flex items-center"><BarChart3 className="mr-4"/>Análisis de Ventas</h1>
             
+             <Card>
+                <h2 className="text-xl font-bold mb-4">Filtros</h2>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+                    <Input label="Filtrar desde" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+                    <Input label="Filtrar hasta" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                    <Input
+                        label="Buscar por nombre o categoría..."
+                        id="sales-search"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
+                </div>
+            </Card>
+
              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Card>
                     <h3 className="text-sm font-medium text-gray-400">Venta Total</h3>
@@ -220,7 +252,7 @@ const SalesPage: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-4">Análisis por Producto Individual</h2>
                  <SearchableProductSelect
                     label="Seleccione un producto para ver el detalle"
-                    products={salesData}
+                    products={filteredSales}
                     value={selectedProduct}
                     onChange={setSelectedProduct}
                 />
@@ -251,7 +283,7 @@ const SalesPage: React.FC = () => {
                  <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={
                         Object.entries(
-                            salesData.reduce((acc: Record<string, number>, sale) => {
+                            filteredSales.reduce((acc: Record<string, number>, sale) => {
                                 acc[sale.category] = (acc[sale.category] || 0) + sale.totalProfit;
                                 return acc;
                             }, {})
@@ -271,13 +303,6 @@ const SalesPage: React.FC = () => {
 
             <Card>
                 <h2 className="text-2xl font-bold mb-4">Detalle de Ventas por Producto</h2>
-                <Input
-                    label="Buscar por nombre o categoría..."
-                    id="sales-search"
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="mb-4"
-                />
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
                         <thead className="border-b-2 border-accent">
@@ -304,7 +329,11 @@ const SalesPage: React.FC = () => {
                                 <tr>
                                     <td colSpan={6} className="text-center p-8 text-gray-400">
                                         <SearchX className="w-12 h-12 mx-auto mb-2 text-gray-500"/>
-                                        No se encontraron productos para "<strong>{searchTerm}</strong>".
+                                        {searchTerm ? (
+                                            <span>No se encontraron productos para "<strong>{searchTerm}</strong>".</span>
+                                        ) : (
+                                            <span>No hay ventas en el período seleccionado.</span>
+                                        )}
                                     </td>
                                 </tr>
                             )}

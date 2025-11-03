@@ -349,7 +349,6 @@ const CartaPage: React.FC<{ onNavigateToRecipe: (recipe: Recipe) => void }> = ({
                                     </h2>
                                 )}
                                 {isEditMode && (
-// FIX: The Button component does not have a 'size' prop. Removing it to fix the error.
                                     <Button variant="danger" onClick={() => handleDeleteSection(sectionIndex)}><Trash2 size={16} /></Button>
                                 )}
                             </div>
@@ -371,7 +370,6 @@ const CartaPage: React.FC<{ onNavigateToRecipe: (recipe: Recipe) => void }> = ({
                                                     <td className="p-2"><Input label="" value={item.name} onChange={e => handleMenuChange(sectionIndex, itemIndex, 'name', e.target.value)} /></td>
                                                     <td className="p-2 w-40"><Input label="" type="number" value={item.price} onChange={e => handleMenuChange(sectionIndex, itemIndex, 'price', parseFloat(e.target.value) || 0)} /></td>
                                                     <td className="p-2 text-right">
-{/* FIX: The Button component does not have a 'size' prop. Removing it to fix the error. */}
                                                         <Button variant="danger" onClick={() => handleDeleteItem(sectionIndex, itemIndex)}><Trash2 size={16}/></Button>
                                                     </td>
                                                 </tr>

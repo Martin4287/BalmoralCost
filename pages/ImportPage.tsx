@@ -1,16 +1,24 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { saveProductPrices, saveProductSales, saveInternalConsumptions, getIngredients, getRecipes, getProductPrices, getProductSales, getInternalConsumptions, getRecipeHistory, getInventoryCounts, getMenuData, getMenuMappings, getGlobalWasteRate, getWithdrawals, getLowStockSettings } from '../services/db';
+import { 
+    saveProductPrices, saveProductSales, saveInternalConsumptions, getIngredients, 
+    getRecipes, getProductPrices, getProductSales, getInternalConsumptions, 
+    getRecipeHistory, getInventoryCounts, getMenuData, getMenuMappings, 
+    getGlobalWasteRate, getWithdrawals, getLowStockSettings, saveIngredients, 
+    saveRecipes, saveRecipeHistory, saveInventoryCounts, saveMenuData, 
+    saveMenuMappings, saveGlobalWasteRate, saveWithdrawals, saveLowStockSettings 
+} from '../services/db';
 import type { ProductPrice, ProductSale } from '../types';
 import { generateId } from '../lib/helpers';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import { FileUp, FileDown, AlertTriangle } from 'lucide-react';
+import { FileUp, FileDown, AlertTriangle, UploadCloud } from 'lucide-react';
 
 const ImportPage: React.FC = () => {
     const [priceFile, setPriceFile] = useState<File | null>(null);
     const [salesFile, setSalesFile] = useState<File | null>(null);
     const [consumptionsFile, setConsumptionsFile] = useState<File | null>(null);
+    const [backupFile, setBackupFile] = useState<File | null>(null);
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
     const handleFileChange = (setter: React.Dispatch<React.SetStateAction<File | null>>) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -124,8 +132,9 @@ const ImportPage: React.FC = () => {
         }
     };
     
-     const handleExportData = async () => {
+    const handleExportData = async () => {
         try {
+            setFeedback(null);
             const allData = {
                 ingredients: await getIngredients(),
                 recipes: await getRecipes(),
@@ -157,6 +166,50 @@ const ImportPage: React.FC = () => {
         }
     };
 
+    const handleImportBackup = async () => {
+        if (!backupFile) return;
+        setFeedback(null);
+
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const text = e.target?.result as string;
+                const data = JSON.parse(text);
+
+                // Basic validation to check if it's a valid backup file
+                const requiredKeys = ['ingredients', 'recipes', 'productPrices', 'productSales', 'internalConsumptions', 'recipeHistory', 'inventoryCounts', 'menuData', 'menuMappings', 'globalWasteRate', 'withdrawals', 'lowStockSettings'];
+                const missingKeys = requiredKeys.filter(key => !(key in data));
+                if (missingKeys.length > 0) {
+                    throw new Error(`Archivo de backup inválido o corrupto. Faltan datos para: ${missingKeys.join(', ')}`);
+                }
+
+                // Save all data, overwriting existing data
+                await Promise.all([
+                    saveIngredients(data.ingredients || []),
+                    saveRecipes(data.recipes || []),
+                    saveProductPrices(data.productPrices || []),
+                    saveProductSales(data.productSales || []),
+                    saveInternalConsumptions(data.internalConsumptions || []),
+                    saveRecipeHistory(data.recipeHistory || []),
+                    saveInventoryCounts(data.inventoryCounts || []),
+                    saveMenuData(data.menuData || null),
+                    saveMenuMappings(data.menuMappings || {}),
+                    saveGlobalWasteRate(data.globalWasteRate || 0),
+                    saveWithdrawals(data.withdrawals || []),
+                    saveLowStockSettings(data.lowStockSettings || {})
+                ]);
+                
+                alert('¡Copia de seguridad importada con éxito! La aplicación se recargará para aplicar los cambios.');
+                window.location.reload();
+
+            } catch (error: any) {
+                setFeedback({ type: 'error', message: `Error al importar la copia de seguridad: ${error.message}` });
+            }
+        };
+        reader.onerror = () => setFeedback({ type: 'error', message: 'No se pudo leer el archivo.' });
+        reader.readAsText(backupFile);
+    };
+
 
     return (
         <div>
@@ -170,64 +223,75 @@ const ImportPage: React.FC = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                 {/* --- IMPORT SECTION --- */}
-                <Card>
-                    <h2 className="text-2xl font-bold mb-4 flex items-center"><FileUp className="mr-3 text-brand"/>Importar Datos desde Excel</h2>
-                    <div className="space-y-6">
-                        {/* Prices Import */}
-                        <div className="p-4 border border-accent rounded-lg">
-                            <h3 className="font-semibold text-lg text-gray-200">1. Importar Precios de Venta</h3>
-                            <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">PVP</code>. Opcionales: <code className="bg-primary px-1 rounded">RUBRO</code>, <code className="bg-primary px-1 rounded">CODIGO</code>, etc.</p>
-                            <div className="flex items-center gap-4 mt-3">
-                                <input type="file" accept=".xlsx" onChange={handleFileChange(setPriceFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
-                                <Button onClick={handleImportPrices} disabled={!priceFile}>Importar Precios</Button>
+                <div className="space-y-8">
+                    <Card>
+                        <h2 className="text-2xl font-bold mb-4 flex items-center"><FileUp className="mr-3 text-brand"/>Importar Datos desde Excel</h2>
+                        <div className="space-y-6">
+                            {/* Prices Import */}
+                            <div className="p-4 border border-accent rounded-lg">
+                                <h3 className="font-semibold text-lg text-gray-200">1. Importar Precios de Venta</h3>
+                                <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">PVP</code>. Opcionales: <code className="bg-primary px-1 rounded">RUBRO</code>, <code className="bg-primary px-1 rounded">CODIGO</code>, etc.</p>
+                                <div className="flex items-center gap-4 mt-3">
+                                    <input type="file" accept=".xlsx" onChange={handleFileChange(setPriceFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
+                                    <Button onClick={handleImportPrices} disabled={!priceFile}>Importar Precios</Button>
+                                </div>
                             </div>
-                        </div>
 
-                        {/* Sales Import */}
-                        <div className="p-4 border border-accent rounded-lg">
-                            <h3 className="font-semibold text-lg text-gray-200">2. Importar Ventas</h3>
-                            <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">FECHA</code>, <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">CANTIDAD</code>. La fecha debe estar en formato de fecha de Excel.</p>
-                             <div className="flex items-center gap-4 mt-3">
-                                <input type="file" accept=".xlsx" onChange={handleFileChange(setSalesFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
-                                <Button onClick={handleImportSales} disabled={!salesFile}>Importar Ventas</Button>
+                            {/* Sales Import */}
+                            <div className="p-4 border border-accent rounded-lg">
+                                <h3 className="font-semibold text-lg text-gray-200">2. Importar Ventas</h3>
+                                <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">FECHA</code>, <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">CANTIDAD</code>. La fecha debe estar en formato de fecha de Excel.</p>
+                                <div className="flex items-center gap-4 mt-3">
+                                    <input type="file" accept=".xlsx" onChange={handleFileChange(setSalesFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
+                                    <Button onClick={handleImportSales} disabled={!salesFile}>Importar Ventas</Button>
+                                </div>
+                            </div>
+                            
+                            {/* Internal Consumptions Import */}
+                            <div className="p-4 border border-accent rounded-lg">
+                                <h3 className="font-semibold text-lg text-gray-200">3. Importar Consumos Internos / Pérdidas</h3>
+                                <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">FECHA</code>, <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">CANTIDAD</code>, <code className="bg-primary px-1 rounded">MESA</code>.</p>
+                                <div className="flex items-center gap-4 mt-3">
+                                    <input type="file" accept=".xlsx" onChange={handleFileChange(setConsumptionsFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
+                                    <Button onClick={handleImportConsumptions} disabled={!consumptionsFile}>Importar Consumos</Button>
+                                </div>
                             </div>
                         </div>
+                    </Card>
+                </div>
+                {/* --- BACKUP SECTION --- */}
+                 <div className="space-y-8">
+                    <Card>
+                        <h2 className="text-2xl font-bold mb-4 flex items-center"><UploadCloud className="mr-3 text-brand"/>Copia de Seguridad (JSON)</h2>
                         
-                        {/* Internal Consumptions Import */}
+                        {/* Import from Backup */}
                         <div className="p-4 border border-accent rounded-lg">
-                            <h3 className="font-semibold text-lg text-gray-200">3. Importar Consumos Internos / Pérdidas</h3>
-                            <p className="text-sm text-gray-400 mt-1">Suba un archivo .xlsx con las columnas: <code className="bg-primary px-1 rounded">FECHA</code>, <code className="bg-primary px-1 rounded">NOMBRE</code>, <code className="bg-primary px-1 rounded">CANTIDAD</code>, <code className="bg-primary px-1 rounded">MESA</code>.</p>
-                             <div className="flex items-center gap-4 mt-3">
-                                <input type="file" accept=".xlsx" onChange={handleFileChange(setConsumptionsFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
-                                <Button onClick={handleImportConsumptions} disabled={!consumptionsFile}>Importar Consumos</Button>
+                            <h3 className="font-semibold text-lg text-gray-200">Importar desde Copia de Seguridad</h3>
+                            <p className="text-sm text-gray-400 mt-1">Restaure todos sus datos desde un archivo <code className="bg-primary px-1 rounded">.json</code> exportado previamente.</p>
+                            <div className="mt-2 p-2 border border-yellow-500/50 bg-yellow-900/20 rounded-md text-yellow-300 text-xs flex items-center gap-2">
+                                <AlertTriangle size={16}/>
+                                <strong>Atención:</strong> Esta acción sobrescribirá todos los datos existentes en la aplicación.
+                            </div>
+                            <div className="flex items-center gap-4 mt-3">
+                                <input type="file" accept=".json" onChange={handleFileChange(setBackupFile)} className="text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-brand file:text-white hover:file:bg-teal-600"/>
+                                <Button onClick={handleImportBackup} disabled={!backupFile}>Importar Backup</Button>
                             </div>
                         </div>
 
-                    </div>
-                </Card>
-
-                {/* --- EXPORT SECTION --- */}
-                <Card>
-                    <h2 className="text-2xl font-bold mb-4 flex items-center"><FileDown className="mr-3 text-brand"/>Exportar Datos</h2>
-                     <div className="p-4 border border-accent rounded-lg">
-                        <h3 className="font-semibold text-lg text-gray-200">Copia de Seguridad Completa</h3>
-                        <p className="text-sm text-gray-400 mt-1 mb-4">
-                            Exporte todos sus datos (ingredientes, recetas, ventas, etc.) a un único archivo JSON.
-                            Este archivo puede ser utilizado para restaurar sus datos o migrarlos.
-                        </p>
-                        <Button onClick={handleExportData}>
-                            <FileDown className="mr-2" size={18}/>
-                            Exportar Copia de Seguridad
-                        </Button>
-                    </div>
-
-                    <div className="mt-6 p-4 border-t border-accent">
-                         <h3 className="font-semibold text-lg text-yellow-300 flex items-center"><AlertTriangle className="mr-2"/>¡Importante!</h3>
-                         <p className="text-sm text-gray-400 mt-2">
-                             La importación de datos <strong className="text-yellow-400">sobrescribirá</strong> cualquier dato existente del mismo tipo. Por ejemplo, al importar un nuevo archivo de precios, todos los precios anteriores serán reemplazados. Se recomienda hacer una copia de seguridad antes de importar datos nuevos.
-                         </p>
-                    </div>
-                </Card>
+                        {/* Export Backup */}
+                        <div className="mt-6 p-4 border border-accent rounded-lg">
+                            <h3 className="font-semibold text-lg text-gray-200">Exportar Copia de Seguridad Completa</h3>
+                            <p className="text-sm text-gray-400 mt-1 mb-4">
+                                Exporte todos sus datos (ingredientes, recetas, ventas, configuraciones, etc.) a un único archivo JSON.
+                                Guarde este archivo en un lugar seguro.
+                            </p>
+                            <Button onClick={handleExportData}>
+                                <FileDown className="mr-2" size={18}/>
+                                Exportar Copia de Seguridad
+                            </Button>
+                        </div>
+                    </Card>
+                </div>
             </div>
         </div>
     );

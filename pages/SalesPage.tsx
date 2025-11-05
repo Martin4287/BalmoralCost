@@ -130,7 +130,8 @@ const SalesPage: React.FC = () => {
         fetchData();
     }, []);
 
-    const filteredSales = useMemo(() => {
+    // 1. Filter sales by the selected date range
+    const dateFilteredSales = useMemo(() => {
         if (!startDate || !endDate) {
             return salesData;
         }
@@ -144,38 +145,49 @@ const SalesPage: React.FC = () => {
         });
     }, [salesData, startDate, endDate]);
     
-    // Aggregate sales by product name for a cleaner view and correct totals
+    // 2. Further filter by search term for summary cards and graph
+    const finalDataForDisplay = useMemo(() => {
+        if (!searchTerm) {
+            return dateFilteredSales;
+        }
+        const lowercasedTerm = searchTerm.toLowerCase();
+        return dateFilteredSales.filter(sale =>
+            sale.name.toLowerCase().includes(lowercasedTerm) ||
+            sale.category.toLowerCase().includes(lowercasedTerm)
+        );
+    }, [dateFilteredSales, searchTerm]);
+    
+    // 3. Aggregate sales by product name for the main table view
     const aggregatedSales = useMemo(() => {
-        if (!filteredSales.length) return [];
+        if (!dateFilteredSales.length) return [];
         
         const salesMap = new Map<string, DetailedSale>();
 
-        for (const sale of filteredSales) {
+        for (const sale of dateFilteredSales) {
             const existing = salesMap.get(sale.name);
             if (existing) {
                 existing.quantity += sale.quantity;
                 existing.totalProfit += sale.totalProfit;
             } else {
-                // Important: clone the sale object to avoid mutating the original array
                 salesMap.set(sale.name, { ...sale });
             }
         }
         return Array.from(salesMap.values());
-    }, [filteredSales]);
+    }, [dateFilteredSales]);
 
 
-    const requestSort = (key: keyof DetailedSale) => {
-        let direction: 'ascending' | 'descending' = 'ascending';
-        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
-            direction = 'descending';
-        }
-        setSortConfig({ key, direction });
-    };
-
+    // 4. Sort and filter the aggregated data for the table
     const sortedAndFilteredSales = useMemo(() => {
         let sortableItems = [...aggregatedSales];
         
-        // Sort
+        if (searchTerm) {
+            const lowercasedTerm = searchTerm.toLowerCase();
+            sortableItems = sortableItems.filter(sale =>
+                sale.name.toLowerCase().includes(lowercasedTerm) ||
+                sale.category.toLowerCase().includes(lowercasedTerm)
+            );
+        }
+        
         sortableItems.sort((a, b) => {
             const key = sortConfig.key;
             const valA = a[key] ?? '';
@@ -194,18 +206,12 @@ const SalesPage: React.FC = () => {
             return 0;
         });
 
-        // Filter by search term
-        if (!searchTerm) {
-            return sortableItems;
-        }
-        return sortableItems.filter(sale =>
-            sale.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            sale.category.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        return sortableItems;
     }, [aggregatedSales, searchTerm, sortConfig]);
 
+    // 5. Calculate summary stats based on the fully filtered data
     const summaryStats = useMemo(() => {
-        const sourceData = filteredSales;
+        const sourceData = finalDataForDisplay; // Use the fully filtered data
         const totalItemsSold = sourceData.reduce((sum: number, item) => sum + item.quantity, 0);
         const totalRevenue = sourceData.reduce((sum: number, item) => sum + (item.salePrice * item.quantity), 0);
         const totalCost = sourceData.reduce((sum: number, item) => sum + (item.costWithVAT * item.quantity), 0);
@@ -213,7 +219,15 @@ const SalesPage: React.FC = () => {
         const averageMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
         
         return { totalItemsSold, totalRevenue, totalProfit, averageMargin };
-    }, [filteredSales]);
+    }, [finalDataForDisplay]);
+
+    const requestSort = (key: keyof DetailedSale) => {
+        let direction: 'ascending' | 'descending' = 'ascending';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+            direction = 'descending';
+        }
+        setSortConfig({ key, direction });
+    };
 
     if (loading) {
         return <div className="text-center p-10">Cargando datos de ventas...</div>;
@@ -260,7 +274,6 @@ const SalesPage: React.FC = () => {
                 </Card>
                  <Card>
                     <h3 className="text-sm font-medium text-gray-400">Margen Promedio</h3>
-                    {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
                     <p className="text-3xl font-bold text-white mt-1">{`${summaryStats.averageMargin.toFixed(1)}%`}</p>
                 </Card>
                 <Card>
@@ -297,7 +310,6 @@ const SalesPage: React.FC = () => {
                         </div>
                          <div>
                             <p className="text-sm text-gray-400">Margen</p>
-                            {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
                             <p className="text-lg font-bold">{`${selectedProduct.margin.toFixed(1)}%`}</p>
                         </div>
                     </div>
@@ -309,7 +321,7 @@ const SalesPage: React.FC = () => {
                  <ResponsiveContainer width="100%" height={300}>
                     <BarChart data={
                         Object.entries(
-                            filteredSales.reduce((acc: Record<string, number>, sale) => {
+                            finalDataForDisplay.reduce((acc: Record<string, number>, sale) => {
                                 acc[sale.category] = (acc[sale.category] || 0) + sale.totalProfit;
                                 return acc;
                             }, {})
@@ -349,7 +361,6 @@ const SalesPage: React.FC = () => {
                                     <td className="p-3 text-right font-mono">{sale.quantity}</td>
                                     <td className="p-3 text-right font-mono">{formatCurrency(sale.salePrice)}</td>
                                     <td className="p-3 text-right font-mono text-green-400">{formatCurrency(sale.totalProfit)}</td>
-                                    {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
                                     <td className={`p-3 text-right font-mono font-bold ${sale.margin < 40 ? 'text-red-500' : 'text-green-400'}`}>{`${sale.margin.toFixed(1)}%`}</td>
                                 </tr>
                             )) : (

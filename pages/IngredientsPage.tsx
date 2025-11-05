@@ -262,7 +262,6 @@ const IngredientsPage: React.FC<{ setIsFormDirty: (isDirty: boolean) => void; }>
                          <div key={name} className="flex items-center gap-3">
                             <label htmlFor={`low-stock-${name}`} className="flex-1 text-gray-300 truncate">{name}</label>
                             <Input
-// FIX: The 'label' prop is required. Provide an empty string as other parts of the codebase do when an external label is used.
                                 label=""
                                 id={`low-stock-${name}`}
                                 type="number"

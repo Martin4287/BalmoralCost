@@ -98,14 +98,23 @@ export interface LowStockItem {
     unit: string;
 }
 
+export interface InternalConsumptionSummaryItem {
+    name: string;
+    quantity: number;
+    tableType?: string;
+    totalCost: number;
+}
+
 export interface DashboardData {
     topSelling: TopSellingItem[];
     mostProfitable: MostProfitableItem[];
     salesForce: SalesForceItem[];
     menuEngineering: MenuEngineeringData;
     cubiertosSale?: ProductSale;
-    internalConsumptionsSummary: ProductSale[];
+    internalConsumptionsSummary: InternalConsumptionSummaryItem[];
+    totalInternalConsumptionsCost: number;
     lowStockItems: LowStockItem[];
+    unmatchedSales: ProductSale[];
 }
 
 // For Stock Page

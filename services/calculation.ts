@@ -1,5 +1,6 @@
-import type { Recipe, Ingredient, ProductSale, ProductPrice, DashboardData, StockData, StockMovement, RecipeIngredient, SubRecipeItem, SalesForceItem, Withdrawal, MenuData, LowStockSettings, LowStockItem } from '../types';
+import type { Recipe, Ingredient, ProductSale, ProductPrice, DashboardData, StockData, StockMovement, RecipeIngredient, SubRecipeItem, SalesForceItem, Withdrawal, MenuData, LowStockSettings, LowStockItem, InternalConsumptionSummaryItem } from '../types';
 import { VAT_RATE } from '../lib/constants';
+import { generateId } from '../lib/helpers';
 
 // --- Recipe Cost Calculation ---
 
@@ -33,6 +34,8 @@ const validateCostCache = (allIngredients: Ingredient[], allRecipes: Recipe[]) =
  * This function is memoized using a self-invalidating cache. The cache is cleared
  * automatically if the `allIngredients` or `allRecipes` arrays change.
  * Handles nested sub-recipes and ingredient costs.
+ * **Crucially, it now uses the price from the LATEST purchase of an ingredient type,
+ * ensuring costs are always up-to-date.**
  * @param recipe The recipe to calculate the cost for.
  * @param allIngredients A list of all available ingredients.
  * @param allRecipes A list of all available recipes (for sub-recipe lookups).
@@ -57,10 +60,26 @@ export const calculateRecipeCost = (
 
     // 1. Calculate cost from direct ingredients
     recipe.ingredients.forEach((item: RecipeIngredient) => {
-        // Find the specific purchase record for the ingredient
-        const ingredient = allIngredients.find(ing => ing.id === item.ingredientId);
-        if (ingredient && item.quantity > 0) {
-            const costBeforeWaste = ingredient.costPerUnit * item.quantity;
+        // Find the specific purchase linked in the recipe to determine the *type* of ingredient.
+        const linkedPurchase = allIngredients.find(ing => ing.id === item.ingredientId);
+        if (!linkedPurchase) return; // Skip if the linked ingredient was deleted
+
+        // Determine the canonical name to group all purchases of this ingredient type.
+        const canonicalName = linkedPurchase.canonicalName || linkedPurchase.name;
+
+        // Find all purchases of this ingredient type and sort them to get the most recent one.
+        const allPurchasesOfKind = allIngredients
+            .filter(ing => (ing.canonicalName || ing.name) === canonicalName)
+            // FIX: Added .getTime() to the second Date object to correctly perform subtraction between two numbers.
+            .sort((a, b) => new Date(b.purchaseDate || 0).getTime() - new Date(a.purchaseDate || 0).getTime());
+
+        // The latest purchase determines the current cost.
+        const latestPurchase = allPurchasesOfKind[0];
+        if (!latestPurchase) return; // Should not happen if linkedPurchase exists, but a good safeguard.
+
+        // Use the cost from the latest purchase, but the quantity from the recipe item.
+        if (item.quantity > 0) {
+            const costBeforeWaste = latestPurchase.costPerUnit * item.quantity;
             // Account for waste (merma)
             const wasteFactor = 1 - ((item.wastePercentage || 0) / 100);
             if (wasteFactor > 0) {
@@ -129,27 +148,43 @@ export const calculateDashboardData = (
     };
     const regularSales = sales.filter(s => !s.name.toLowerCase().includes('cubierto'));
 
-    // Process regular sales data
-    const processedSales = regularSales
-        .map(sale => {
-            const recipeData = recipeDataMap.get(sale.name);
-            if (!recipeData) return null;
+    // Process regular sales data, separating matched from unmatched
+    const processedSales: any[] = [];
+    const unmatchedSales: ProductSale[] = [];
 
+    regularSales.forEach(sale => {
+        const recipeData = recipeDataMap.get(sale.name);
+        if (!recipeData) {
+            unmatchedSales.push(sale);
+        } else {
             const costWithVAT = recipeData.cost * (1 + VAT_RATE);
             const profitPerUnit = recipeData.price - costWithVAT;
             const totalProfit = profitPerUnit * sale.quantity;
             const margin = recipeData.price > 0 ? (profitPerUnit / recipeData.price) * 100 : 0;
 
-            return {
+            processedSales.push({
                 name: sale.name,
                 quantity: sale.quantity,
                 profitPerUnit,
                 totalProfit,
                 margin,
                 category: recipeData.recipe.category
-            };
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null);
+            });
+        }
+    });
+    
+    // Summarize unmatched sales to avoid a huge list on the dashboard
+    const summarizedUnmatchedSales = new Map<string, number>();
+    unmatchedSales.forEach(sale => {
+        summarizedUnmatchedSales.set(sale.name, (summarizedUnmatchedSales.get(sale.name) || 0) + sale.quantity);
+    });
+    
+    const finalUnmatchedSales: ProductSale[] = Array.from(summarizedUnmatchedSales.entries()).map(([name, quantity]) => ({
+        id: generateId(), // a temporary id
+        date: '', // date is not relevant for this summary
+        name,
+        quantity
+    })).sort((a,b) => b.quantity - a.quantity).slice(0, 10); // show top 10 unmatched
 
     // Top 10 Selling (now excludes cubiertos)
     const topSelling = [...processedSales].sort((a, b) => b.quantity - a.quantity).slice(0, 10);
@@ -203,10 +238,32 @@ export const calculateDashboardData = (
         };
     });
     
-    // Top 10 Internal Consumptions
-    const internalConsumptionsSummary = [...internalConsumptions]
-        .sort((a, b) => b.quantity - a.quantity)
+    // Analyze Internal Consumptions by Cost
+    const processedConsumptions: InternalConsumptionSummaryItem[] = internalConsumptions.map(consumption => {
+        const recipeData = recipeDataMap.get(consumption.name);
+        if (!recipeData) {
+            return null;
+        }
+        // For consumptions, we care about the raw cost (not with VAT) as it's an internal expense.
+        const totalCost = recipeData.cost * consumption.quantity;
+
+        return {
+            name: consumption.name,
+            quantity: consumption.quantity,
+            tableType: consumption.tableType,
+            totalCost: totalCost,
+        };
+        // FIX: Explicitly type the 'item' parameter in the filter to guide type inference
+        // and correct the type predicate validation error.
+    }).filter((item: InternalConsumptionSummaryItem | null): item is InternalConsumptionSummaryItem => item !== null);
+
+    const totalInternalConsumptionsCost = processedConsumptions.reduce((sum, item) => sum + item.totalCost, 0);
+    
+    // Top 10 Internal Consumptions sorted by total cost
+    const internalConsumptionsSummary = [...processedConsumptions]
+        .sort((a, b) => b.totalCost - a.totalCost)
         .slice(0, 10);
+
 
     // Low Stock Items Calculation
     const stockData = calculateStockData(recipes, ingredients, sales, internalConsumptions, withdrawals);
@@ -234,7 +291,9 @@ export const calculateDashboardData = (
         },
         cubiertosSale,
         internalConsumptionsSummary,
+        totalInternalConsumptionsCost,
         lowStockItems,
+        unmatchedSales: finalUnmatchedSales,
     };
 };
 

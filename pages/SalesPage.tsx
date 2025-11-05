@@ -143,6 +143,26 @@ const SalesPage: React.FC = () => {
             return saleDate >= start && saleDate <= end;
         });
     }, [salesData, startDate, endDate]);
+    
+    // Aggregate sales by product name for a cleaner view and correct totals
+    const aggregatedSales = useMemo(() => {
+        if (!filteredSales.length) return [];
+        
+        const salesMap = new Map<string, DetailedSale>();
+
+        for (const sale of filteredSales) {
+            const existing = salesMap.get(sale.name);
+            if (existing) {
+                existing.quantity += sale.quantity;
+                existing.totalProfit += sale.totalProfit;
+            } else {
+                // Important: clone the sale object to avoid mutating the original array
+                salesMap.set(sale.name, { ...sale });
+            }
+        }
+        return Array.from(salesMap.values());
+    }, [filteredSales]);
+
 
     const requestSort = (key: keyof DetailedSale) => {
         let direction: 'ascending' | 'descending' = 'ascending';
@@ -153,7 +173,7 @@ const SalesPage: React.FC = () => {
     };
 
     const sortedAndFilteredSales = useMemo(() => {
-        let sortableItems = [...filteredSales];
+        let sortableItems = [...aggregatedSales];
         
         // Sort
         sortableItems.sort((a, b) => {
@@ -182,7 +202,7 @@ const SalesPage: React.FC = () => {
             sale.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             sale.category.toLowerCase().includes(searchTerm.toLowerCase())
         );
-    }, [filteredSales, searchTerm, sortConfig]);
+    }, [aggregatedSales, searchTerm, sortConfig]);
 
     const summaryStats = useMemo(() => {
         const sourceData = filteredSales;
@@ -240,7 +260,8 @@ const SalesPage: React.FC = () => {
                 </Card>
                  <Card>
                     <h3 className="text-sm font-medium text-gray-400">Margen Promedio</h3>
-                    <p className="text-3xl font-bold text-white mt-1">{summaryStats.averageMargin.toFixed(1)}%</p>
+                    {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
+                    <p className="text-3xl font-bold text-white mt-1">{`${summaryStats.averageMargin.toFixed(1)}%`}</p>
                 </Card>
                 <Card>
                     <h3 className="text-sm font-medium text-gray-400">Productos Vendidos</h3>
@@ -252,12 +273,16 @@ const SalesPage: React.FC = () => {
                 <h2 className="text-2xl font-bold mb-4">Análisis por Producto Individual</h2>
                  <SearchableProductSelect
                     label="Seleccione un producto para ver el detalle"
-                    products={filteredSales}
+                    products={aggregatedSales}
                     value={selectedProduct}
                     onChange={setSelectedProduct}
                 />
                 {selectedProduct && (
-                    <div className="mt-6 p-4 bg-accent rounded-lg grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div className="mt-6 p-4 bg-accent rounded-lg grid grid-cols-2 md:grid-cols-5 gap-4 text-center">
+                        <div>
+                            <p className="text-sm text-gray-400">Cant. Vendida (período)</p>
+                            <p className="text-lg font-bold">{selectedProduct.quantity.toLocaleString('es-AR')}</p>
+                        </div>
                         <div>
                             <p className="text-sm text-gray-400">Precio Unitario</p>
                             <p className="text-lg font-bold">{formatCurrency(selectedProduct.salePrice)}</p>
@@ -272,7 +297,8 @@ const SalesPage: React.FC = () => {
                         </div>
                          <div>
                             <p className="text-sm text-gray-400">Margen</p>
-                            <p className="text-lg font-bold">{selectedProduct.margin.toFixed(1)}%</p>
+                            {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
+                            <p className="text-lg font-bold">{`${selectedProduct.margin.toFixed(1)}%`}</p>
                         </div>
                     </div>
                 )}
@@ -323,7 +349,8 @@ const SalesPage: React.FC = () => {
                                     <td className="p-3 text-right font-mono">{sale.quantity}</td>
                                     <td className="p-3 text-right font-mono">{formatCurrency(sale.salePrice)}</td>
                                     <td className="p-3 text-right font-mono text-green-400">{formatCurrency(sale.totalProfit)}</td>
-                                    <td className={`p-3 text-right font-mono font-bold ${sale.margin < 40 ? 'text-red-500' : 'text-green-400'}`}>{sale.margin.toFixed(1)}%</td>
+                                    {/* FIX: Wrap expression in template literal to avoid JSX parsing error with '%' */}
+                                    <td className={`p-3 text-right font-mono font-bold ${sale.margin < 40 ? 'text-red-500' : 'text-green-400'}`}>{`${sale.margin.toFixed(1)}%`}</td>
                                 </tr>
                             )) : (
                                 <tr>

@@ -156,6 +156,30 @@ const DashboardPage: React.FC<{ onNavigate: (page: 'stock' | 'ingredients') => v
                 </Card>
             )}
 
+            {data.unmatchedSales.length > 0 && (
+                <Card className="border-l-4 border-orange-400 bg-orange-900/30">
+                    <div className="flex flex-col md:flex-row gap-4">
+                        <div className="flex-shrink-0">
+                            <AlertTriangle className="w-10 h-10 text-orange-400" />
+                        </div>
+                        <div className="flex-grow">
+                            <h2 className="text-2xl font-bold text-orange-300">Ventas No Analizadas</h2>
+                            <p className="text-sm text-gray-400 mt-2 mb-3">
+                                Los siguientes productos se vendieron pero no se encontraron en su lista de recetas con un nombre idéntico. No se incluirán en los análisis de rentabilidad. Verifique que los nombres coincidan entre su sistema de ventas y sus recetas en la aplicación.
+                            </p>
+                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm">
+                                {data.unmatchedSales.map(item => (
+                                    <div key={item.name} className="flex justify-between">
+                                        <span className="font-semibold text-white truncate pr-4" title={item.name}>{item.name}</span>
+                                        <span className="font-mono text-orange-300">{item.quantity} uds.</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </Card>
+            )}
+
             {data.cubiertosSale && data.cubiertosSale.quantity > 0 && (
                  <Card>
                     <h2 className="text-2xl font-bold mb-4 flex items-center"><UtensilsCrossed className="mr-3 text-brand"/>Cenas y Almuerzos</h2>
@@ -168,21 +192,30 @@ const DashboardPage: React.FC<{ onNavigate: (page: 'stock' | 'ingredients') => v
 
             {data.internalConsumptionsSummary && data.internalConsumptionsSummary.length > 0 && (
                 <Card>
-                    <h2 className="text-2xl font-bold mb-4 flex items-center"><ClipboardList className="mr-3 text-brand"/>Consumos Internos (Top 10)</h2>
+                    <div className="flex justify-between items-start mb-4">
+                        <h2 className="text-2xl font-bold flex items-center"><ClipboardList className="mr-3 text-brand"/>Consumos Internos (Top 10 por Costo)</h2>
+                        <div className="text-right">
+                            <p className="text-sm text-gray-400">Costo Total de Consumos</p>
+                            <p className="text-xl font-bold text-red-400">{formatCurrency(data.totalInternalConsumptionsCost)}</p>
+                        </div>
+                    </div>
+
                     <div className="space-y-2">
                         {data.internalConsumptionsSummary.map((item, index) => (
-                            <div key={index} className="flex justify-between items-center text-sm bg-accent/50 p-2 rounded">
-                                <div className="flex items-center gap-2">
-                                    <span className="font-semibold text-gray-300">{item.name}</span>
+                            <div key={index} className="grid grid-cols-12 items-center text-sm bg-accent/50 p-2 rounded gap-2">
+                                <div className="col-span-8 flex items-center gap-2">
+                                    <span className="font-semibold text-gray-300 truncate" title={item.name}>{item.name} ({item.quantity.toLocaleString('es-AR')} uds.)</span>
                                     {item.tableType && (
-                                        <span className="text-xs font-medium bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded-full">{item.tableType}</span>
+                                        <span className="text-xs font-medium bg-purple-900/50 text-purple-300 px-2 py-0.5 rounded-full whitespace-nowrap">{item.tableType}</span>
                                     )}
                                 </div>
-                                <span className="font-mono text-white">{item.quantity.toLocaleString('es-AR')} uds.</span>
+                                <div className="col-span-4 font-mono text-red-400 text-right">
+                                    {formatCurrency(item.totalCost)}
+                                </div>
                             </div>
                         ))}
                     </div>
-                     <p className="text-xs text-gray-500 mt-3">Total de productos registrados como consumo interno, invitaciones o pérdidas.</p>
+                     <p className="text-xs text-gray-500 mt-3">Costo total de productos registrados como consumo interno, invitaciones o pérdidas.</p>
                 </Card>
             )}
             

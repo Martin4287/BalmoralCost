@@ -54,16 +54,17 @@ const InventoryPage: React.FC = () => {
     }, []);
 
     const costPerUnitMap = useMemo(() => {
-        const map = new Map<string, { cost: number, unit: UnitOfMeasure }>();
-        // Create a map of the latest cost for each canonical name
         const latestPurchases = new Map<string, Ingredient>();
-        allIngredients.forEach(ing => {
+        // First, find the latest purchase for each canonical name
+        for (const ing of allIngredients) {
             const name = ing.canonicalName || ing.name;
             const existing = latestPurchases.get(name);
             if (!existing || new Date(ing.purchaseDate || 0) > new Date(existing.purchaseDate || 0)) {
                 latestPurchases.set(name, ing);
             }
-        });
+        }
+        // Then, create the final map with just the cost and unit
+        const map = new Map<string, { cost: number, unit: UnitOfMeasure }>();
         latestPurchases.forEach((ing, name) => {
             map.set(name, { cost: ing.costPerUnit, unit: ing.unit });
         });

@@ -374,12 +374,23 @@ export const calculateStockData = (
     sales: ProductSale[],
     internalConsumptions: ProductSale[],
     withdrawals: Withdrawal[],
+    endDate?: string,
 ): StockData[] => {
+    const end = endDate ? new Date(endDate) : null;
+    if (end) {
+        end.setHours(23, 59, 59, 999);
+    }
+
+    const relevantIngredients = end ? ingredients.filter(i => new Date(i.purchaseDate || 0) <= end) : ingredients;
+    const relevantSales = end ? sales.filter(s => new Date(s.date) <= end) : sales;
+    const relevantInternalConsumptions = end ? internalConsumptions.filter(c => new Date(c.date) <= end) : internalConsumptions;
+    const relevantWithdrawals = end ? withdrawals.filter(w => new Date(w.date) <= end) : withdrawals;
+
     const stockMovements = new Map<string, StockMovement[]>();
     const consumptionCache = new Map<string, Map<string, number>>();
 
     // Step 1: Initialize with purchases (Debit)
-    ingredients.forEach(ing => {
+    relevantIngredients.forEach(ing => {
         const name = ing.canonicalName || ing.name;
         if (!stockMovements.has(name)) {
             stockMovements.set(name, []);
@@ -395,7 +406,7 @@ export const calculateStockData = (
     });
 
     // Step 2: Calculate consumption from sales (Credit)
-    sales.forEach(sale => {
+    relevantSales.forEach(sale => {
         const recipe = recipes.find(r => r.name === sale.name);
         if (recipe) {
             const ingredientsPerPortion = getIngredientsForOnePortion(recipe, ingredients, recipes, consumptionCache);
@@ -417,7 +428,7 @@ export const calculateStockData = (
     });
     
     // Step 3: Calculate consumption from internal/control tables (Credit)
-    internalConsumptions.forEach(consumption => {
+    relevantInternalConsumptions.forEach(consumption => {
         const recipe = recipes.find(r => r.name === consumption.name);
         if (recipe) {
             const ingredientsPerPortion = getIngredientsForOnePortion(recipe, ingredients, recipes, consumptionCache);
@@ -439,7 +450,7 @@ export const calculateStockData = (
     });
 
     // Step 4: Calculate withdrawals (Credit)
-    withdrawals.forEach(withdrawal => {
+    relevantWithdrawals.forEach(withdrawal => {
         withdrawal.items.forEach(item => {
             const ingName = item.ingredientName;
             if (!stockMovements.has(ingName)) {

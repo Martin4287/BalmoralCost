@@ -1,61 +1,87 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { getIngredients, getRecipes, getProductSales, getInternalConsumptions, getInventoryCounts, saveInventoryCounts, getWithdrawals } from '../services/db';
 import { calculateStockData } from '../services/calculation';
 import { generateId, formatCurrency } from '../lib/helpers';
-import type { StockData, Ingredient, InventoryCount, InventoryCountItem, UnitOfMeasure } from '../types';
+import type { StockData, Ingredient, InventoryCount, InventoryCountItem, UnitOfMeasure, ProductSale, Recipe, Withdrawal } from '../types';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-import { ClipboardCheck, Save, AlertTriangle, History, Eye, ChevronLeft, Download, SearchX } from 'lucide-react';
+import { ClipboardCheck, Save, AlertTriangle, History, Eye, ChevronLeft, Download, SearchX, Edit, Trash2, X } from 'lucide-react';
 
 const InventoryPage: React.FC = () => {
     const [view, setView] = useState<'current' | 'history'>('current');
     const [loading, setLoading] = useState(true);
     const [stockData, setStockData] = useState<StockData[]>([]);
-    const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
     const [physicalCounts, setPhysicalCounts] = useState<Record<string, string>>({});
     const [isSaving, setIsSaving] = useState(false);
     const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
     const [inventoryHistory, setInventoryHistory] = useState<InventoryCount[]>([]);
     const [selectedHistory, setSelectedHistory] = useState<InventoryCount | null>(null);
-    const [searchTerm, setSearchTerm] = useState(''); // State for the search bar
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [editingInventoryId, setEditingInventoryId] = useState<string | null>(null);
+    
+    // State for date filters
+    const [historyStartDate, setHistoryStartDate] = useState('');
+    const [historyEndDate, setHistoryEndDate] = useState('');
+    const [theoreticalStockStartDate, setTheoreticalStockStartDate] = useState('');
+    const [theoreticalStockEndDate, setTheoreticalStockEndDate] = useState(new Date().toISOString().split('T')[0]);
+    
+    // State to hold all raw data to avoid re-fetching
+    const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
+    const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
+    const [allSales, setAllSales] = useState<ProductSale[]>([]);
+    const [allInternalConsumptions, setAllInternalConsumptions] = useState<ProductSale[]>([]);
+    const [allWithdrawals, setAllWithdrawals] = useState<Withdrawal[]>([]);
+
+    const fetchAllData = useCallback(async () => {
+        setLoading(true);
+        try {
+            const [recipes, ingredients, sales, internalConsumptions, history, withdrawals] = await Promise.all([
+                getRecipes(),
+                getIngredients(),
+                getProductSales(),
+                getInternalConsumptions(),
+                getInventoryCounts(),
+                getWithdrawals(),
+            ]);
+            
+            setAllIngredients(ingredients);
+            setAllRecipes(recipes);
+            setAllSales(sales);
+            setAllInternalConsumptions(internalConsumptions);
+            setAllWithdrawals(withdrawals);
+            setInventoryHistory(history.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        } catch (error) {
+            console.error("Error loading inventory data:", error);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+    
+    useEffect(() => {
+        fetchAllData();
+    }, [fetchAllData]);
 
     useEffect(() => {
-        const fetchData = async () => {
-            setLoading(true);
-            try {
-                const [recipes, ingredients, sales, internalConsumptions, history, withdrawals] = await Promise.all([
-                    getRecipes(),
-                    getIngredients(),
-                    getProductSales(),
-                    getInternalConsumptions(),
-                    getInventoryCounts(),
-                    getWithdrawals(),
-                ]);
-                
-                setAllIngredients(ingredients);
-                setInventoryHistory(history.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        if (loading) return; // Don't calculate if initial data is not loaded yet
+        
+        // Note: The calculation for theoretical stock only uses the 'end date'.
+        // The 'start date' is for user context but not part of the point-in-time calculation logic.
+        const calculatedData = calculateStockData(
+            allRecipes, 
+            allIngredients, 
+            allSales, 
+            allInternalConsumptions, 
+            allWithdrawals, 
+            theoreticalStockEndDate
+        );
+        setStockData(calculatedData);
+    }, [allRecipes, allIngredients, allSales, allInternalConsumptions, allWithdrawals, theoreticalStockEndDate, loading]);
 
-                if (recipes.length > 0 && ingredients.length > 0) {
-                    const calculatedData = calculateStockData(recipes, ingredients, sales, internalConsumptions, withdrawals);
-                    setStockData(calculatedData);
-                }
-            } catch (error) {
-                console.error("Error loading inventory data:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchData();
-    }, []);
 
     const costPerUnitMap = useMemo(() => {
         const latestPurchases = new Map<string, Ingredient>();
-        // First, find the latest purchase for each canonical name
         for (const ing of allIngredients) {
             const name = ing.canonicalName || ing.name;
             const existing = latestPurchases.get(name);
@@ -63,7 +89,6 @@ const InventoryPage: React.FC = () => {
                 latestPurchases.set(name, ing);
             }
         }
-        // Then, create the final map with just the cost and unit
         const map = new Map<string, { cost: number, unit: UnitOfMeasure }>();
         latestPurchases.forEach((ing, name) => {
             map.set(name, { cost: ing.costPerUnit, unit: ing.unit });
@@ -71,11 +96,8 @@ const InventoryPage: React.FC = () => {
         return map;
     }, [allIngredients]);
     
-    // Filter stock data based on search term
     const filteredStockData = useMemo(() => {
-        if (!searchTerm) {
-            return stockData;
-        }
+        if (!searchTerm) return stockData;
         const lowercasedTerm = searchTerm.toLowerCase();
         return stockData.filter(item =>
             item.ingredientName.toLowerCase().includes(lowercasedTerm)
@@ -83,34 +105,36 @@ const InventoryPage: React.FC = () => {
     }, [stockData, searchTerm]);
 
     const filteredInventoryHistory = useMemo(() => {
-        if (!startDate || !endDate) return inventoryHistory;
-
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        if (!historyStartDate || !historyEndDate) return inventoryHistory;
+        const start = new Date(historyStartDate);
+        const end = new Date(historyEndDate);
         end.setDate(end.getDate() + 1); // Make end date inclusive
-
         return inventoryHistory.filter(inv => {
             const invDate = new Date(inv.date);
             return invDate >= start && invDate < end;
         });
-    }, [inventoryHistory, startDate, endDate]);
-
+    }, [inventoryHistory, historyStartDate, historyEndDate]);
 
     const handleCountChange = (ingredientName: string, value: string) => {
         setPhysicalCounts(prev => ({ ...prev, [ingredientName]: value }));
     };
+    
+    const resetForm = () => {
+        setPhysicalCounts({});
+        setEditingInventoryId(null);
+        setSearchTerm('');
+        setTheoreticalStockEndDate(new Date().toISOString().split('T')[0]);
+        setTheoreticalStockStartDate('');
+    };
 
     const handleSaveInventory = async () => {
         setIsSaving(true);
-        // IMPORTANT: We iterate over the full `stockData` list, not the filtered one,
-        // to ensure all items are included in the final inventory record.
         const inventoryItems: InventoryCountItem[] = stockData.map(item => {
             const theoreticalQty = item.finalBalance;
             const physicalQty = parseFloat(physicalCounts[item.ingredientName] || '0');
             const varianceQty = physicalQty - theoreticalQty;
             const costInfo = costPerUnitMap.get(item.ingredientName);
             const costOfVariance = costInfo ? varianceQty * costInfo.cost : 0;
-            
             return {
                 ingredientName: item.ingredientName,
                 unit: (costInfo?.unit || 'unidad') as UnitOfMeasure,
@@ -121,58 +145,107 @@ const InventoryPage: React.FC = () => {
             };
         });
         
-        const newInventory: InventoryCount = {
-            id: generateId(),
-            date: new Date().toISOString(),
-            items: inventoryItems,
-        };
+        let updatedHistory;
+
+        if (editingInventoryId) {
+            // Update existing inventory
+            updatedHistory = inventoryHistory.map(inv => {
+                if (inv.id === editingInventoryId) {
+                    return {
+                        ...inv,
+                        date: new Date().toISOString(), // Update timestamp to now
+                        calculationStartDate: theoreticalStockStartDate,
+                        calculationDate: theoreticalStockEndDate,
+                        items: inventoryItems,
+                    };
+                }
+                return inv;
+            });
+        } else {
+             // Create new inventory
+            const newInventory: InventoryCount = {
+                id: generateId(),
+                date: new Date().toISOString(),
+                calculationStartDate: theoreticalStockStartDate,
+                calculationDate: theoreticalStockEndDate,
+                items: inventoryItems,
+            };
+            updatedHistory = [newInventory, ...inventoryHistory];
+        }
         
-        const updatedHistory = [...inventoryHistory, newInventory];
         await saveInventoryCounts(updatedHistory);
         setInventoryHistory(updatedHistory.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-        setPhysicalCounts({});
+        resetForm();
         setIsSaving(false);
         setView('history');
-        setSelectedHistory(newInventory);
+        const justSavedId = editingInventoryId || updatedHistory[0].id;
+        setSelectedHistory(updatedHistory.find(i => i.id === justSavedId) || null);
     };
     
     const handleDownloadTemplate = () => {
-        if (stockData.length === 0) {
-            alert("No hay datos de stock para generar una plantilla.");
-            return;
-        }
+        if (stockData.length === 0) return;
         setIsDownloadingTemplate(true);
         try {
             const dataToExport = stockData.map(item => ({
                 'Insumo': item.ingredientName,
                 'Unidad': item.unit,
-                'Stock Teórico': item.finalBalance,
-                'Cantidad Física': '', // Empty column for user input
+                'Stock Teórico': item.finalBalance.toFixed(3),
+                'Cantidad Física': '',
             }));
-
             const worksheet = XLSX.utils.json_to_sheet(dataToExport);
             worksheet['!cols'] = [ { wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 } ];
             const workbook = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(workbook, worksheet, 'Plantilla Inventario');
             XLSX.writeFile(workbook, `plantilla_inventario_${new Date().toISOString().split('T')[0]}.xlsx`);
-        } catch(error) {
-            console.error("Error downloading inventory template:", error);
-            alert("Hubo un error al generar la plantilla.");
         } finally {
             setIsDownloadingTemplate(false);
+        }
+    };
+
+    const handleEditInventory = (inventoryToEdit: InventoryCount) => {
+        setEditingInventoryId(inventoryToEdit.id);
+        setTheoreticalStockEndDate(inventoryToEdit.calculationDate);
+        setTheoreticalStockStartDate(inventoryToEdit.calculationStartDate || '');
+        
+        const counts = inventoryToEdit.items.reduce((acc, item) => {
+            acc[item.ingredientName] = String(item.physicalQty);
+            return acc;
+        }, {} as Record<string, string>);
+
+        setPhysicalCounts(counts);
+        setView('current');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleDeleteInventory = async (id: string) => {
+        if (window.confirm('¿Está seguro de que desea eliminar este registro de inventario? Esta acción es permanente.')) {
+            const originalHistory = inventoryHistory;
+            const updatedHistory = inventoryHistory.filter(inv => inv.id !== id);
+            
+            // Optimistic update
+            setInventoryHistory(updatedHistory);
+
+            try {
+                await saveInventoryCounts(updatedHistory);
+            } catch (error) {
+                console.error("Error al eliminar el inventario:", error);
+                // Rollback on failure
+                setInventoryHistory(originalHistory);
+                alert("No se pudo eliminar el registro del inventario. La vista ha sido restaurada.");
+            }
         }
     };
 
     if (loading) {
         return <div className="text-center p-10">Cargando datos para inventario...</div>;
     }
-
+    
     if (view === 'history') {
         return (
             <div>
                 <div className="flex justify-between items-center mb-6">
                     <h1 className="text-4xl font-bold text-white flex items-center"><History className="mr-4"/> Historial de Inventarios</h1>
-                    <Button onClick={() => { setView('current'); setSelectedHistory(null); }}><ChevronLeft className="mr-2"/> Realizar Nuevo Inventario</Button>
+                    <Button onClick={() => { setView('current'); setSelectedHistory(null); resetForm(); }}><ChevronLeft className="mr-2"/> Realizar Nuevo Inventario</Button>
                 </div>
                 {selectedHistory ? (
                     <Card>
@@ -188,21 +261,25 @@ const InventoryPage: React.FC = () => {
                 ) : (
                     <>
                         <Card className="mb-6">
-                            <h2 className="text-xl font-bold mb-4">Filtrar Historial</h2>
+                            <h2 className="text-xl font-bold mb-4">Filtrar Historial de Inventarios</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <Input label="Desde" type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-                                <Input label="Hasta" type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+                                <Input label="Desde" type="date" value={historyStartDate} onChange={e => setHistoryStartDate(e.target.value)} />
+                                <Input label="Hasta" type="date" value={historyEndDate} onChange={e => setHistoryEndDate(e.target.value)} />
                             </div>
                         </Card>
                         <Card>
                             {filteredInventoryHistory.length > 0 ? (
                                 <ul className="space-y-3">
                                     {filteredInventoryHistory.map(inv => (
-                                        <li key={inv.id} className="p-4 bg-accent rounded-lg flex justify-between items-center hover:bg-brand/20 transition-colors">
+                                        <li key={inv.id} className="p-4 bg-accent rounded-lg flex justify-between items-center hover:bg-brand/20 transition-colors flex-wrap gap-2">
                                             <p className="font-semibold text-lg text-gray-200">
                                                 Inventario del {new Date(inv.date).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                             </p>
-                                            <Button variant="secondary" onClick={() => setSelectedHistory(inv)}><Eye className="mr-2"/> Ver Detalle</Button>
+                                            <div className="flex items-center gap-2">
+                                                <Button variant="secondary" onClick={() => setSelectedHistory(inv)}><Eye className="mr-2"/> Ver Detalle</Button>
+                                                <Button variant="secondary" onClick={() => handleEditInventory(inv)}><Edit className="mr-2"/> Editar</Button>
+                                                <Button variant="danger" onClick={() => handleDeleteInventory(inv.id)}><Trash2/></Button>
+                                            </div>
                                         </li>
                                     ))}
                                 </ul>
@@ -216,13 +293,13 @@ const InventoryPage: React.FC = () => {
         );
     }
 
-    if (stockData.length === 0) {
+    if (allIngredients.length === 0) {
         return (
             <Card className="text-center">
                 <AlertTriangle className="w-16 h-16 mx-auto text-yellow-400 mb-4" />
                 <h2 className="text-2xl font-bold mb-2">Datos Insuficientes</h2>
                 <p className="text-gray-400 max-w-xl mx-auto">
-                    Para realizar un inventario, primero debe cargar insumos, recetas e importar datos de ventas.
+                    Para realizar un inventario, primero debe cargar insumos.
                 </p>
             </Card>
         );
@@ -230,18 +307,47 @@ const InventoryPage: React.FC = () => {
     
     return (
         <div>
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-4xl font-bold text-white flex items-center"><ClipboardCheck className="mr-4"/> Inventario Físico</h1>
-                <div className="flex gap-4">
+            <div className="flex justify-between items-center mb-6 flex-wrap gap-4">
+                <h1 className="text-4xl font-bold text-white flex items-center">
+                    <ClipboardCheck className="mr-4"/> {editingInventoryId ? 'Editando Inventario Físico' : 'Inventario Físico'}
+                </h1>
+                <div className="flex gap-4 flex-wrap">
                     <Button variant="secondary" onClick={handleDownloadTemplate} disabled={isDownloadingTemplate}>
                         <Download className="mr-2"/> {isDownloadingTemplate ? 'Generando...' : 'Descargar Plantilla'}
                     </Button>
-                    <Button variant="secondary" onClick={() => setView('history')}><History className="mr-2"/>Ver Historial</Button>
+                    <Button variant="secondary" onClick={() => { setView('history'); resetForm(); }}><History className="mr-2"/>Ver Historial</Button>
+                    {editingInventoryId && (
+                        <Button variant="secondary" onClick={() => { setView('history'); resetForm(); }}>
+                           <X className="mr-2"/> Cancelar Edición
+                        </Button>
+                    )}
                     <Button onClick={handleSaveInventory} disabled={isSaving}>
-                        <Save className="mr-2"/> {isSaving ? 'Guardando...' : 'Guardar Inventario'}
+                        <Save className="mr-2"/> {isSaving ? 'Guardando...' : (editingInventoryId ? 'Actualizar Inventario' : 'Guardar Inventario')}
                     </Button>
                 </div>
             </div>
+
+            <Card className="mb-6">
+                <h2 className="text-xl font-bold text-brand mb-2">Fecha de Cálculo del Stock Teórico</h2>
+                <p className="text-sm text-gray-400 mb-4">
+                    Seleccione el rango de fechas para el cual se calculará el stock teórico. Esto afectará a la columna "Stock Teórico" en la tabla. El inventario se guardará con este rango de referencia.
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg">
+                     <Input 
+                        label="Desde"
+                        type="date" 
+                        value={theoreticalStockStartDate} 
+                        onChange={e => setTheoreticalStockStartDate(e.target.value)} 
+                    />
+                    <Input 
+                        label="Hasta" 
+                        type="date" 
+                        value={theoreticalStockEndDate} 
+                        onChange={e => setTheoreticalStockEndDate(e.target.value)} 
+                    />
+                </div>
+            </Card>
+            
             <Card>
                 <div className="mb-6">
                     <Input
@@ -311,12 +417,35 @@ const InventoryPage: React.FC = () => {
     );
 };
 
-
 const InventoryReportTable: React.FC<{report: InventoryCount}> = ({ report }) => {
     const totalVarianceCost = report.items.reduce((acc, item) => acc + item.costOfVariance, 0);
 
+    const formatDateForDisplay = (dateString: string | undefined): string => {
+        if (!dateString) return '';
+        // Input string is 'YYYY-MM-DD'. new Date() parses this as UTC midnight.
+        // To display it correctly in the user's timezone without shifting a day,
+        // we create the date object with a specified time and no timezone info,
+        // so it defaults to the user's local timezone.
+        const [year, month, day] = dateString.split('-').map(Number);
+        const date = new Date(year, month - 1, day);
+        return date.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+    };
+
+    const calculationDateText = useMemo(() => {
+        const endDateStr = formatDateForDisplay(report.calculationDate);
+        if (report.calculationStartDate) {
+            const startDateStr = formatDateForDisplay(report.calculationStartDate);
+            return `Stock Teórico calculado con movimientos desde el ${startDateStr} hasta el ${endDateStr}`;
+        }
+        return `Stock Teórico calculado con movimientos hasta el: ${endDateStr}`;
+    }, [report]);
+
+
     return (
         <div className="overflow-x-auto">
+            <p className="text-sm text-gray-400 mb-4 text-center">
+                <strong>{calculationDateText}</strong>
+            </p>
              <table className="w-full text-left">
                 <thead className="border-b-2 border-accent">
                     <tr>
@@ -328,7 +457,7 @@ const InventoryReportTable: React.FC<{report: InventoryCount}> = ({ report }) =>
                     </tr>
                 </thead>
                 <tbody>
-                    {report.items.map(item => (
+                    {report.items.sort((a,b) => a.ingredientName.localeCompare(b.ingredientName)).map(item => (
                         <tr key={item.ingredientName} className="border-b border-accent">
                             <td className="p-3 font-semibold">{item.ingredientName}</td>
                             <td className="p-3 text-right font-mono">{item.theoreticalQty.toFixed(3)} {item.unit}</td>

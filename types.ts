@@ -146,7 +146,9 @@ export interface InventoryCountItem {
 
 export interface InventoryCount {
     id: string;
-    date: string;
+    date: string; // Date the count was performed/saved
+    calculationStartDate?: string; // The "from" date for theoretical stock calculation
+    calculationDate: string; // The "up to" date for theoretical stock calculation
     items: InventoryCountItem[];
 }
 

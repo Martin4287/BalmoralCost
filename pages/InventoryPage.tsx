@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
 import { getIngredients, getRecipes, getProductSales, getInternalConsumptions, getInventoryCounts, saveInventoryCounts, getWithdrawals } from '../services/db';
 import { calculateStockData } from '../services/calculation';
 import { generateId, formatCurrency } from '../lib/helpers';
@@ -7,7 +9,8 @@ import type { StockData, Ingredient, InventoryCount, InventoryCountItem, UnitOfM
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-import { ClipboardCheck, Save, AlertTriangle, History, Eye, ChevronLeft, Download, SearchX, Edit, Trash2, X } from 'lucide-react';
+import PrintableInventoryReport from '../components/PrintableInventoryReport';
+import { ClipboardCheck, Save, AlertTriangle, History, Eye, ChevronLeft, SearchX, Edit, Trash2, X, FileText, FileSpreadsheet } from 'lucide-react';
 
 const InventoryPage: React.FC = () => {
     const [view, setView] = useState<'current' | 'history'>('current');
@@ -15,24 +18,24 @@ const InventoryPage: React.FC = () => {
     const [stockData, setStockData] = useState<StockData[]>([]);
     const [physicalCounts, setPhysicalCounts] = useState<Record<string, string>>({});
     const [isSaving, setIsSaving] = useState(false);
-    const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
     const [inventoryHistory, setInventoryHistory] = useState<InventoryCount[]>([]);
     const [selectedHistory, setSelectedHistory] = useState<InventoryCount | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [editingInventoryId, setEditingInventoryId] = useState<string | null>(null);
     
-    // State for date filters
     const [historyStartDate, setHistoryStartDate] = useState('');
     const [historyEndDate, setHistoryEndDate] = useState('');
     const [theoreticalStockStartDate, setTheoreticalStockStartDate] = useState('');
     const [theoreticalStockEndDate, setTheoreticalStockEndDate] = useState(new Date().toISOString().split('T')[0]);
     
-    // State to hold all raw data to avoid re-fetching
     const [allIngredients, setAllIngredients] = useState<Ingredient[]>([]);
     const [allRecipes, setAllRecipes] = useState<Recipe[]>([]);
     const [allSales, setAllSales] = useState<ProductSale[]>([]);
     const [allInternalConsumptions, setAllInternalConsumptions] = useState<ProductSale[]>([]);
     const [allWithdrawals, setAllWithdrawals] = useState<Withdrawal[]>([]);
+
+    const [inventoryForPDF, setInventoryForPDF] = useState<InventoryCount | null>(null);
 
     const fetchAllData = useCallback(async () => {
         setLoading(true);
@@ -64,10 +67,7 @@ const InventoryPage: React.FC = () => {
     }, [fetchAllData]);
 
     useEffect(() => {
-        if (loading) return; // Don't calculate if initial data is not loaded yet
-        
-        // Note: The calculation for theoretical stock only uses the 'end date'.
-        // The 'start date' is for user context but not part of the point-in-time calculation logic.
+        if (loading) return;
         const calculatedData = calculateStockData(
             allRecipes, 
             allIngredients, 
@@ -78,6 +78,40 @@ const InventoryPage: React.FC = () => {
         );
         setStockData(calculatedData);
     }, [allRecipes, allIngredients, allSales, allInternalConsumptions, allWithdrawals, theoreticalStockEndDate, loading]);
+
+
+    const handleDownloadPDFReport = (inventory: InventoryCount) => {
+        if (isExporting) return; // Prevent multiple clicks
+        setInventoryForPDF(inventory);
+    };
+
+    const generatePdfAndCleanup = useCallback(async (element: HTMLElement) => {
+        setIsExporting(true);
+        try {
+            const canvas = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            if (inventoryForPDF) { // Should always be true here
+                pdf.save(`reporte_inventario_${new Date(inventoryForPDF.date).toISOString().split('T')[0]}.pdf`);
+            }
+        } catch (error) {
+            console.error("Error generating PDF:", error);
+            alert("Hubo un error al generar el PDF.");
+        } finally {
+            setIsExporting(false);
+            setInventoryForPDF(null); // Cleanup to unmount the component
+        }
+    }, [inventoryForPDF]);
+
+    const printableAreaRef = useCallback((node: HTMLDivElement | null) => {
+        if (node !== null) {
+            generatePdfAndCleanup(node);
+        }
+    }, [generatePdfAndCleanup]);
 
 
     const costPerUnitMap = useMemo(() => {
@@ -108,7 +142,7 @@ const InventoryPage: React.FC = () => {
         if (!historyStartDate || !historyEndDate) return inventoryHistory;
         const start = new Date(historyStartDate);
         const end = new Date(historyEndDate);
-        end.setDate(end.getDate() + 1); // Make end date inclusive
+        end.setDate(end.getDate() + 1);
         return inventoryHistory.filter(inv => {
             const invDate = new Date(inv.date);
             return invDate >= start && invDate < end;
@@ -148,28 +182,9 @@ const InventoryPage: React.FC = () => {
         let updatedHistory;
 
         if (editingInventoryId) {
-            // Update existing inventory
-            updatedHistory = inventoryHistory.map(inv => {
-                if (inv.id === editingInventoryId) {
-                    return {
-                        ...inv,
-                        date: new Date().toISOString(), // Update timestamp to now
-                        calculationStartDate: theoreticalStockStartDate,
-                        calculationDate: theoreticalStockEndDate,
-                        items: inventoryItems,
-                    };
-                }
-                return inv;
-            });
+            updatedHistory = inventoryHistory.map(inv => inv.id === editingInventoryId ? { ...inv, date: new Date().toISOString(), calculationStartDate: theoreticalStockStartDate, calculationDate: theoreticalStockEndDate, items: inventoryItems } : inv);
         } else {
-             // Create new inventory
-            const newInventory: InventoryCount = {
-                id: generateId(),
-                date: new Date().toISOString(),
-                calculationStartDate: theoreticalStockStartDate,
-                calculationDate: theoreticalStockEndDate,
-                items: inventoryItems,
-            };
+            const newInventory: InventoryCount = { id: generateId(), date: new Date().toISOString(), calculationStartDate: theoreticalStockStartDate, calculationDate: theoreticalStockEndDate, items: inventoryItems };
             updatedHistory = [newInventory, ...inventoryHistory];
         }
         
@@ -182,36 +197,41 @@ const InventoryPage: React.FC = () => {
         setSelectedHistory(updatedHistory.find(i => i.id === justSavedId) || null);
     };
     
-    const handleDownloadTemplate = () => {
-        if (stockData.length === 0) return;
-        setIsDownloadingTemplate(true);
-        try {
-            const dataToExport = stockData.map(item => ({
-                'Insumo': item.ingredientName,
-                'Unidad': item.unit,
-                'Stock Teórico': item.finalBalance.toFixed(3),
-                'Cantidad Física': '',
-            }));
-            const worksheet = XLSX.utils.json_to_sheet(dataToExport);
-            worksheet['!cols'] = [ { wch: 40 }, { wch: 15 }, { wch: 20 }, { wch: 20 } ];
-            const workbook = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(workbook, worksheet, 'Plantilla Inventario');
-            XLSX.writeFile(workbook, `plantilla_inventario_${new Date().toISOString().split('T')[0]}.xlsx`);
-        } finally {
-            setIsDownloadingTemplate(false);
-        }
+    const handleDownloadXLSXReport = (inventory: InventoryCount) => {
+        const dataToExport = inventory.items.map(item => ({
+            'Insumo': item.ingredientName,
+            'Stock Teórico': item.theoreticalQty,
+            'Unidad Teórica': item.unit,
+            'Stock Físico': item.physicalQty,
+            'Varianza (Unidades)': item.varianceQty,
+            'Varianza (Costo)': item.costOfVariance,
+        }));
+
+        const worksheet = XLSX.utils.json_to_sheet([]);
+        XLSX.utils.sheet_add_aoa(worksheet, [
+            ["Reporte de Inventario"],
+            ["Realizado el:", new Date(inventory.date).toLocaleString('es-AR')],
+            ["Período de Cálculo:", `Desde ${inventory.calculationStartDate ? new Date(inventory.calculationStartDate).toLocaleDateString('es-AR') : 'Inicio'} hasta ${new Date(inventory.calculationDate).toLocaleDateString('es-AR')}`],
+            [] // Empty row
+        ], { origin: "A1" });
+        XLSX.utils.sheet_add_json(worksheet, dataToExport, { origin: "A5", skipHeader: false });
+        
+        worksheet['!cols'] = [ { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 20 } ];
+
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, worksheet, 'Reporte Inventario');
+        XLSX.writeFile(workbook, `reporte_inventario_${new Date(inventory.date).toISOString().split('T')[0]}.xlsx`);
     };
+    
 
     const handleEditInventory = (inventoryToEdit: InventoryCount) => {
         setEditingInventoryId(inventoryToEdit.id);
         setTheoreticalStockEndDate(inventoryToEdit.calculationDate);
         setTheoreticalStockStartDate(inventoryToEdit.calculationStartDate || '');
-        
         const counts = inventoryToEdit.items.reduce((acc, item) => {
             acc[item.ingredientName] = String(item.physicalQty);
             return acc;
         }, {} as Record<string, string>);
-
         setPhysicalCounts(counts);
         setView('current');
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -221,15 +241,11 @@ const InventoryPage: React.FC = () => {
         if (window.confirm('¿Está seguro de que desea eliminar este registro de inventario? Esta acción es permanente.')) {
             const originalHistory = inventoryHistory;
             const updatedHistory = inventoryHistory.filter(inv => inv.id !== id);
-            
-            // Optimistic update
             setInventoryHistory(updatedHistory);
-
             try {
                 await saveInventoryCounts(updatedHistory);
             } catch (error) {
                 console.error("Error al eliminar el inventario:", error);
-                // Rollback on failure
                 setInventoryHistory(originalHistory);
                 alert("No se pudo eliminar el registro del inventario. La vista ha sido restaurada.");
             }
@@ -276,9 +292,11 @@ const InventoryPage: React.FC = () => {
                                                 Inventario del {new Date(inv.date).toLocaleDateString('es-AR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                             </p>
                                             <div className="flex items-center gap-2">
-                                                <Button variant="secondary" onClick={() => setSelectedHistory(inv)}><Eye className="mr-2"/> Ver Detalle</Button>
-                                                <Button variant="secondary" onClick={() => handleEditInventory(inv)}><Edit className="mr-2"/> Editar</Button>
-                                                <Button variant="danger" onClick={() => handleDeleteInventory(inv.id)}><Trash2/></Button>
+                                                <Button variant="secondary" onClick={() => setSelectedHistory(inv)} title="Ver Detalle"><Eye/></Button>
+                                                <Button variant="secondary" onClick={() => handleEditInventory(inv)} title="Editar"><Edit/></Button>
+                                                <Button variant="secondary" onClick={() => handleDownloadPDFReport(inv)} title="Descargar PDF" disabled={isExporting}><FileText/></Button>
+                                                <Button variant="secondary" onClick={() => handleDownloadXLSXReport(inv)} title="Descargar XLSX"><FileSpreadsheet/></Button>
+                                                <Button variant="danger" onClick={() => handleDeleteInventory(inv.id)} title="Eliminar"><Trash2/></Button>
                                             </div>
                                         </li>
                                     ))}
@@ -312,9 +330,6 @@ const InventoryPage: React.FC = () => {
                     <ClipboardCheck className="mr-4"/> {editingInventoryId ? 'Editando Inventario Físico' : 'Inventario Físico'}
                 </h1>
                 <div className="flex gap-4 flex-wrap">
-                    <Button variant="secondary" onClick={handleDownloadTemplate} disabled={isDownloadingTemplate}>
-                        <Download className="mr-2"/> {isDownloadingTemplate ? 'Generando...' : 'Descargar Plantilla'}
-                    </Button>
                     <Button variant="secondary" onClick={() => { setView('history'); resetForm(); }}><History className="mr-2"/>Ver Historial</Button>
                     {editingInventoryId && (
                         <Button variant="secondary" onClick={() => { setView('history'); resetForm(); }}>
@@ -413,6 +428,12 @@ const InventoryPage: React.FC = () => {
                     </table>
                 </div>
             </Card>
+            
+            {inventoryForPDF && (
+                <div ref={printableAreaRef} className="printable-area">
+                    <PrintableInventoryReport report={inventoryForPDF} />
+                </div>
+            )}
         </div>
     );
 };
@@ -422,13 +443,8 @@ const InventoryReportTable: React.FC<{report: InventoryCount}> = ({ report }) =>
 
     const formatDateForDisplay = (dateString: string | undefined): string => {
         if (!dateString) return '';
-        // Input string is 'YYYY-MM-DD'. new Date() parses this as UTC midnight.
-        // To display it correctly in the user's timezone without shifting a day,
-        // we create the date object with a specified time and no timezone info,
-        // so it defaults to the user's local timezone.
-        const [year, month, day] = dateString.split('-').map(Number);
-        const date = new Date(year, month - 1, day);
-        return date.toLocaleDateString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
+        const date = new Date(dateString);
+        return new Date(date.getTime() + date.getTimezoneOffset() * 60000).toLocaleDateString('es-AR');
     };
 
     const calculationDateText = useMemo(() => {
